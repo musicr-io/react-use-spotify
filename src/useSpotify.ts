@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { isValidVolume, loadSpotifySDK } from "./spotify";
 
 type useSpotifyProps = {
-    token: string;
+    token: string | null;
     playerName: string;
     initialVolume?: number;
     onError?: (error: unknown) => void;
     onReady?: (deviceId: string) => void;
+    onNotReady?: (deviceId: string) => void;
     onPlayerStateChange?: (state: Spotify.PlaybackState) => void;
+    refreshToken?: () => void;
 }
 const emptyFunc = () => { };
 const useSpotify = ({
@@ -16,20 +18,31 @@ const useSpotify = ({
     initialVolume = 0.5,
     onError = emptyFunc,
     onReady = emptyFunc,
+    onNotReady = emptyFunc,
     onPlayerStateChange = emptyFunc,
+    refreshToken = emptyFunc,
 }: useSpotifyProps) => {
     const [player, setPlayer] = useState<Spotify.Player | null>(null);
     const [isReady, setIsReady] = useState(false);
 
     const createPlayer = () => {
-        const player = new Spotify.Player({
-            name: playerName,
-            getOAuthToken: cb => cb(token),
-            volume: isValidVolume(initialVolume) ? initialVolume : 0.3,
-        });
+        if (token) {
+            if (player) {
+                player.disconnect()
+            }
+            const _player = new Spotify.Player({
+                name: playerName,
+                getOAuthToken: cb => {
+                    refreshToken()
+                    cb(token)
+                },
+                volume: isValidVolume(initialVolume) ? initialVolume : 0.5,
+            });
 
-        setPlayer(player);
-        setIsReady(true);
+            setPlayer(_player);
+            setIsReady(true);
+        }
+
     }
     useEffect(() => {
 
@@ -48,16 +61,21 @@ const useSpotify = ({
                 window.Spotify = Spotify;
                 createPlayer();
             }
-        })()
+        })();
+
+        () => player?.disconnect();
     }, [token]);
 
     useEffect(() => {
         if (isReady && player) {
             player.connect()
+            player.addListener('not_ready', ({ device_id }) => onNotReady(device_id));
             player.addListener("ready", ({ device_id }) => onReady(device_id));
             player.addListener("player_state_changed", (state: Spotify.PlaybackState) => onPlayerStateChange(state));
             player.addListener("authentication_error", (error: unknown) => onError(error));
             player.addListener("account_error", (error: unknown) => onError(error));
+            player.addListener("playback_error", (error: unknown) => onError(error));
+            player.addListener('initialization_error', (error: unknown) => onError(error));
 
         }
         () => {
@@ -67,7 +85,7 @@ const useSpotify = ({
             player?.removeListener("authentication_error");
             player?.removeListener("account_error")
         };
-    }, [isReady])
+    }, [isReady, player])
 
 
     return {
